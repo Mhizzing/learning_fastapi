@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -67,11 +68,12 @@ async def read_item(skip: int = 0, limit: int = 10): # We can access these query
 
 
 # Optional parameters
-from typing import Union
+from typing import List, Union
 
 
 @app.get("/things/{thing_id}")
-async def read_thing(thing_id: str, q: Union[str, None] = None, short: bool = False): # q is an optional str query parameter, short is required boolean query parameter.
+async def read_thing(thing_id: str, q: Union[str, None] = None, # q is an optional str query parameter. having a default value makes a parameter optional.
+                        short: bool = False):  # short is required boolean query parameter.
     thing = {"thing_id": thing_id}
     if q:
         thing.update({"q": q})
@@ -95,3 +97,76 @@ async def read_user_item(
         )
     return item
 
+# Request bodies with Pydantic
+
+class Item(BaseModel):
+    name: str
+    description: Union[str, None] = None
+    price: float
+    tax: Union[float, None] = None
+
+@app.post("/items/")
+async def create_item(item: Item):
+    item_dict = item.dict()
+    price_with_tax = item.price + item.tax
+    item_dict.update({"price_with_tax": price_with_tax})
+    return item_dict
+
+# Request body + path parameters
+@app.put("/items/{item_id}") # Function parameters that match path parameters are taken from the path
+async def create_item(item_id: int, item: Item): # Function parameters declared Pydantic models taken from request body
+    return {"item_id": item_id, **item.dict()}
+
+""" 
+If parameter also declared in path, it will be used as path parameter.
+If parameter is a singular type, interpreted as query parameter.
+If parameter is declared to by Pydantic model, interpreted as request body.
+"""
+
+# Additional validation
+@app.get("/fruits/")
+async def read_fruits(q: Union[str, None] = Query(default=None, 
+                                            min_length=3, 
+                                            max_length=50, # Ensure 3 < len(q) < 50
+                                            regex="^fixedquery$" # must match regex pattern
+                                            )): 
+    results = {"fruits": [{"fruit_id": "apple"}, {"fruit_id": "pear"}]}
+    if q:
+        results.update({"q": q})
+    return results
+
+# You can explicitly declare a required parameter with ellipsis (...) or Pydantic's Required
+# You can have a required parameter that accepts None, forcing clients to send a value even if it is None.
+# See documentation for these cases.
+
+# Query parameter lists. The q parameter can receive multiple values in the URL.
+@app.get("/vegetables/")
+async def read_vegetables(
+    q: Union[List[str], None] = Query(
+        default=None,
+        alias="veg", # alias lets us modify the url parameter
+        title="List of vegetable strings",
+        description="Take a list of vegetables to chop up", # We can also add metadata like parameter title/description for documentation
+        min_length=3)): # This validates string lengths not list length
+    veggies = {"q": q}
+    return veggies
+
+# Deprecating and Hiding
+@app.get("/stones/")
+async def read_stones(
+    q: Union[str, None] = Query(
+        default=None,
+        alias="stone-query",
+        title="Query string",
+        description="Query string for stones",
+        min_length=3,
+        max_length=50,
+        regex="^hard$",
+        deprecated=True, # This will show this parameter as deprecated in docs without deleting it
+        #include_in_schema=False, # This will hide this specific parameter from docs
+    )
+):
+    results = {"stones": [{"stone_id": "quartz"}, {"stone_id": "basalt"}]}
+    if q:
+        results.update({"q": q})
+    return results
